@@ -7,12 +7,13 @@
 
 open System
 open System.IO
-open Fake 
+open Fake
 open Fake.AppVeyor
 open Fake.Git
 open Fake.ReleaseNotesHelper
 open Fake.AssemblyInfoFile
 open Fake.SemVerHelper
+open Fake.Testing.NUnit3
 
 // --------------------------------------------------------------------------------------
 // Information about the project to be used at NuGet and in AssemblyInfo files
@@ -22,32 +23,14 @@ Environment.CurrentDirectory <- __SOURCE_DIRECTORY__
 
 let project = "Vagabond"
 let release = LoadReleaseNotes "RELEASE_NOTES.md"
-let nugetVersion = release.NugetVersion
 let isAppVeyorBuild = buildServer = BuildServer.AppVeyor
 let isVersionTag tag = Version.TryParse tag |> fst
 let hasRepoVersionTag = isAppVeyorBuild && AppVeyorEnvironment.RepoTag && isVersionTag AppVeyorEnvironment.RepoTagName
 let assemblyVersion = if hasRepoVersionTag then AppVeyorEnvironment.RepoTagName else release.NugetVersion
-let buildDate = DateTime.UtcNow
 let buildVersion =
     if hasRepoVersionTag then assemblyVersion
     else if isAppVeyorBuild then sprintf "%s-b%s" assemblyVersion AppVeyorEnvironment.BuildNumber
     else assemblyVersion
-
-let nugetDebugVersion =
-    let semVer = SemVerHelper.parse nugetVersion
-    let debugPatch, debugPreRelease =
-        match semVer.PreRelease with
-        | None -> semVer.Patch + 1, { Origin = "alpha001"; Name = "alpha"; Number = Some 1; Parts = [AlphaNumeric "alpha001"] }
-        | Some pre ->
-            let num = match pre.Number with Some i -> i + 1 | None -> 1
-            let name = pre.Name
-            let newOrigin = sprintf "%s%03d" name num
-            semVer.Patch, { Origin = newOrigin; Name = name; Number = Some num; Parts = [AlphaNumeric newOrigin] }
-    let debugVer =
-        { semVer with
-            Patch = debugPatch
-            PreRelease = Some debugPreRelease }
-    debugVer.ToString()
 
 let gitOwner = "mbraceproject"
 let gitHome = "https://github.com/" + gitOwner
@@ -110,11 +93,9 @@ Target "RunTests" (fun _ ->
     ActivateFinalTarget "CloseTestRunner"
 
     testAssemblies
-    |> NUnitSequential.NUnit (fun p ->
+    |> NUnit3 (fun p ->
         { p with
-            DisableShadowCopy = true
-            TimeOut = TimeSpan.FromMinutes 20.
-            OutputFile = "TestResults.xml" })
+            TimeOut = TimeSpan.FromMinutes 20. })
 )
 
 FinalTarget "CloseTestRunner" (fun _ ->  
@@ -129,7 +110,7 @@ Target "NuGet" (fun _ ->
         { p with 
             ToolPath = ".paket/paket.exe" 
             OutputPath = "bin/"
-            Version = nugetDebugVersion
+            Version = release.NugetVersion
             ReleaseNotes = toLines release.Notes })
 )
 
@@ -200,7 +181,6 @@ Target "ReleaseGithub" (fun _ ->
 // Run all targets by default. Invoke 'build <Target>' to override
 
 Target "Default" DoNothing
-Target "RunTestsAndBuildNuget" DoNothing
 Target "Release" DoNothing
 Target "Help" (fun _ -> PrintTargets() )
 
@@ -211,10 +191,7 @@ Target "Help" (fun _ -> PrintTargets() )
   =?> ("RunTests", not isTravisBuild) // Relatively few tests pass on Mono.  We build on Travis but do not test
   ==> "Default"
 
-"NuGet" ==> "RunTestsAndBuildNuget"
-"RunTests" ==> "RunTestsAndBuildNuget"
-
-"Build"
+"Default"
   ==> "NuGet"
   ==> "NuGetPush"
   ==> "GenerateDocs"

@@ -1,4 +1,4 @@
-FSharp.Core
+group Testing
 FsPickler
-group Test
-  Thespian
+Thespian
+FSharp.Core
