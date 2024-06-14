@@ -5,11 +5,13 @@ open System.Collections.Generic
 open System.Collections.Concurrent
 open System.IO
 open System.Reflection
-open System.Runtime.Serialization
+#if !NETSTANDARD
+open System.Runtime.Loader
+#endif
 open System.Threading
 open System.Threading.Tasks
 open System.Text.RegularExpressions
-open System.Security.Cryptography
+open System.Runtime.ExceptionServices
 
 open Microsoft.FSharp.Control
 
@@ -19,30 +21,9 @@ open Microsoft.FSharp.Control
 module internal Utils =
 
     let runsOnMono = lazy(Type.GetType("Mono.Runtime") <> null)
+    let isNetCoreApp = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription.StartsWith ".NET Core"
 
-    let runsOnWindows = lazy(
-        match Environment.OSVersion.Platform with
-        | PlatformID.Unix | PlatformID.MacOSX -> false
-        | _ -> true)
-
-    let private remoteStackTraceField : FieldInfo =
-        let bfs = BindingFlags.NonPublic ||| BindingFlags.Instance
-        match typeof<System.Exception>.GetField("remote_stack_trace", bfs) with
-        | null ->
-            match typeof<System.Exception>.GetField("_remoteStackTraceString", bfs) with
-            | null -> null
-            | f -> f
-        | f -> f
-
-    // bad implementation: would be safer using ExceptionDispatchInfo but would break compatibility with 4.0
-    let inline reraise' (e : #exn) =
-        match remoteStackTraceField with
-        | null -> ()
-        | f ->
-            let trace = e.StackTrace
-            if not <| String.IsNullOrEmpty trace then f.SetValue(e, trace + System.Environment.NewLine)
-            
-        raise e
+    let inline reraise' (e : #exn) : 'T = ExceptionDispatchInfo.Capture(e).Throw() ; Unchecked.defaultof<'T>
 
     /// Value or exception
     type Exn<'T> =
@@ -199,12 +180,18 @@ module internal Utils =
 
     let allBindings = BindingFlags.NonPublic ||| BindingFlags.Public ||| BindingFlags.Instance ||| BindingFlags.Static
 
-    /// try get assembly that is loaded in current appdomain
+    let currentLoadContext =
+        let asm = Assembly.GetExecutingAssembly()
+        AssemblyLoadContext.GetLoadContext asm
+
+    /// try get assembly that is loaded in current assembly load context
     let tryGetLoadedAssembly =
         let load fullName =
+            // first, query AppDomain for loaded assembly of given qualified name
             let results =
-                System.AppDomain.CurrentDomain.GetAssemblies()
-                |> Array.filter (fun a -> a.FullName = fullName)
+                currentLoadContext.Assemblies
+                |> Seq.filter (fun a -> a.FullName = fullName)
+                |> Seq.toArray
 
             match results with
             | [||] -> None
@@ -219,7 +206,7 @@ module internal Utils =
         match tryGetLoadedAssembly fullName with
         | Some _ as a -> a
         | None ->
-            try Some <| Assembly.Load(fullName)
+            try Some <| currentLoadContext.LoadFromAssemblyName(AssemblyName fullName)
             with :? FileNotFoundException | :? FileLoadException -> None
 
 

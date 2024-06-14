@@ -9,22 +9,24 @@ is the case with F# Interactive.
 
 The actual implementation of ThunkServer is a straightforward 100 lines of code.
 Dependency resolution and exportation logic is handled transparently by Vagabond
-**)
+*)
 
-#I "../../bin/"
+#I "bin/Debug/netcoreapp3.1"
+let executable = __SOURCE_DIRECTORY__ + "/bin/Debug/netcoreapp3.1/ThunkServer"
 
 #r "FsPickler.dll"
-#r "ThunkServer.exe"
+#r "Vagabond.dll"
+#r "ThunkServer.dll"
 
 open ThunkServer
 
 // initialize & test a local instance
-ThunkClient.Executable <- __SOURCE_DIRECTORY__ + "/../../bin/ThunkServer.exe"
+ThunkClient.Executable <- executable
 let client = ThunkClient.InitLocal()
 
 (**
 Example 1: simple, incremental interactions
-**)
+*)
 
 let askDeepThought () = 42
 
@@ -34,7 +36,7 @@ client.EvaluateThunk (fun () -> if answer = 42 then failwith "yet another mindle
 
 (**
 Example 2: custom type definitions
-**)
+*)
 
 type BinTree<'T> = Leaf | Node of 'T * BinTree<'T> * BinTree<'T>
 
@@ -50,17 +52,15 @@ let sum = client.EvaluateThunk <| fun () -> reduce 1. (+) tree'
 
 (**
 Example 3: Type providers
-**)
+*)
 
-#r "../../packages/testing/FSharp.Data/lib/net40/FSharp.Data.dll"
+#r "../../packages/fsi/FSharp.Data/lib/netstandard2.0/FSharp.Data.dll"
 
 open FSharp.Data
 
 // World Bank
-
-let wb = WorldBankData.GetDataContext()
-
 let top5 () = 
+    let wb = WorldBankData.GetDataContext()
     query {
         for country in wb.Regions.``Euro area``.Countries do
         sortByDescending country.Indicators.``GDP per capita (current US$)``.[2012]
@@ -73,7 +73,7 @@ client.EvaluateThunk top5
 
 (**
 Example 4 : Asynchronous workflows
-**)
+*)
 
 let runRemoteAsync (workflow : Async<'T>) =
     client.EvaluateThunk(fun () -> Async.RunSynchronously workflow)
@@ -95,7 +95,7 @@ runRemoteAsync test
 
 (**
 Example 5: Deploy a locally defined actor
-**)
+*)
 
 #r "Thespian.dll"
 open Nessos.Thespian
@@ -129,11 +129,11 @@ ref <-- Increment 2
 ref <-- Increment 3
 ref <!= GetCount
 
-(*
+(**
 Example 6: Deploy library-generated dynamic assemblies
 *)
 
-#I "../../packages/testing/LinqOptimizer.FSharp/lib/"
+#I "../../packages/fsi/LinqOptimizer.FSharp/lib/netstandard2.0/"
 
 #r "LinqOptimizer.Base.dll"
 #r "LinqOptimizer.Core.dll"
@@ -159,8 +159,8 @@ client.EvaluateThunk query
 Example 7: Deploy library-generated dynamic assemblies
 *)
 
-#r "../../packages/testing/MathNet.Numerics/lib/net40/MathNet.Numerics.dll"
-#r "../../packages/testing/MathNet.Numerics.FSharp/lib/net40/MathNet.Numerics.FSharp.dll"
+#r "../../packages/fsi/MathNet.Numerics/lib/netstandard2.0/MathNet.Numerics.dll"
+#r "../../packages/fsi/MathNet.Numerics.FSharp/lib/netstandard2.0/MathNet.Numerics.FSharp.dll"
 
 open MathNet.Numerics
 open MathNet.Numerics.LinearAlgebra
@@ -172,7 +172,8 @@ let getRandomDeterminant () =
 client.EvaluateThunk getRandomDeterminant
 
 // register native assemblies to Vagabond state
-let content = __SOURCE_DIRECTORY__ + "/../../packages/testing/MathNet.Numerics.MKL.Win-x64/content/"
+// NB this works on windows x64 only
+let content = __SOURCE_DIRECTORY__ + "/../../packages/fsi/MathNet.Numerics.MKL.Win-x64/build/x64/"
 client.RegisterNativeDependency <| content + "libiomp5md.dll"
 client.RegisterNativeDependency <| content + "MathNet.Numerics.MKL.dll"
 client.NativeAssemblies
